@@ -18,8 +18,8 @@ Install the dependent packages with pip. Copy all files to a new directory. Addi
 
 Once the MTRDR image is in .cub format, you can run the conversion function in command line with `python -c 'import crism; crism.mtrdr_to_color(fname, output_name)'`. Standard output is the following 7 parameters:
 
-- 'VIS' - Similar to the official CRISM VIS parameter value, covering the wavelength range from 380 - 780 nm
-- 'FAL' - Similar to the official CRISM FAL parameter value, covering the wavelength range from 1.1 - 2.2 microns.
+- 'VIS' - Similar to the official CRISM VIS parameter, covering the wavelength range from 380 - 780 nm
+- 'FAL' - Similar to the official CRISM FAL parameter, covering the wavelength range from 1.1 - 2.2 microns.
 - 'FEM' - "Fe-mineral" capturing the 750 nm - 1.2 micron range due to variations in iron oxidation and mineralogy.
 - 'MAF' - "Mafic minerals" capturing the 800 nm - 2.0 micron range, primarily due to variations in unweathered basaltic minerals.
 - 'PHY' - "Phyllosilicates" capturing the 1.8 - 2.2 micron range, with color strongly dependent on H20 and OH vibrational bands.
@@ -28,7 +28,7 @@ Once the MTRDR image is in .cub format, you can run the conversion function in c
 
 If you would not like the above standard outputs, add `standard_params=False` to the mtrdr_to_color inputs. 
 
-If you would like to create your own parameters, add `new_params=[[wave1, wave2], [wave1, wave2]...]` to the mtrdr_to_color inputs. To find wavelength ranges which may highlight interesting mineralogy, see [Vivano-Beck (2014)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2014JE004627), which discusses the spectral signals of various common Mars minerals.
+If you would like to use your own wavelength ranges, add `new_params=[[wave1, wave2], [wave1, wave2]...]` to the mtrdr_to_color inputs. To find wavelength ranges which may highlight interesting mineralogy, see [Vivano-Beck (2014)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2014JE004627), which discusses the spectral signals of various common Mars minerals.
 
 ## Future improvements
 
