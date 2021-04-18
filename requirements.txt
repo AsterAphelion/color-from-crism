@@ -1,0 +1,12 @@
+affine==2.3.0
+attrs==20.3.0
+certifi==2020.12.5
+click==7.1.2
+click-plugins==1.1.1
+cligj==0.7.1
+numpy==1.20.2
+pyparsing==2.4.7
+pypng==0.0.20
+rasterio==1.2.2
+snuggs==1.4.7
+spectres==2.1.1
