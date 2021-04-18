@@ -1,18 +1,18 @@
 # Color from CRISM
 Python scripts to generate color parameter products from CRISM images.
 
-# Requirements
+## Requirements
 
 - ISIS3 (for now)
 - requirements.txt
 
-# Description
+## Description
 
 This Python package converts a Compact Reconnaissance Imaging Spectrometer for Mars (CRISM) data cube and converts a given wavelength range into sRGB space using the CIE color matching functions. For the visible wavelength range, this is a close approximation to standard human vision. For other wavelength ranges, this simulates the standard human visual response for that wavelength range.
 
 This code was developed to aid visualization of hyperspectral imaging data. It is free for personal use and academic presentations and publications. Please provide an acknowledgement in your visualization/presentation/publication when using this work.
 
-# Setup and Use
+## Setup and Use
 
 Install the dependent packages with pip. Copy all files to a new directory. Additionally, this package currently relies on ISIS3 to convert a [CRISM MTRDR image and detached label file](https://pds-geosciences.wustl.edu/missions/mro/crism.htm) to an ISIS3 image cube which can be read with the rasterio package. When downloading an image of interest from the Planetary Data System, the files you will need for successful processing will end with **if**###j_mtr3.img and **if**###j_mtr3.lbl. Then run the ISIS3 command `pds2isis from=\*.lbl to=[name].cub`. 
 
@@ -30,6 +30,6 @@ If you would not like the above standard outputs, add `standard_params=False` to
 
 If you would like to create your own parameters, add `new_params=[[wave1, wave2], [wave1, wave2]...]` to the mtrdr_to_color inputs. To find wavelength ranges which may highlight interesting mineralogy, see [Vivano-Beck (2014)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2014JE004627), which discusses the spectral signals of various common Mars minerals.
 
-# Acknowledgements
+## Acknowledgements
 This code makes heavy use of the 'ColourSystem' class [described on the SciPython blog](https://scipython.com/blog/converting-a-spectrum-to-a-colour/). It also uses the [SpectRes package](https://spectres.readthedocs.io/en/latest/) to convert CIE matching functions to different wavelength ranges. 
 
