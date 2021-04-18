@@ -1,5 +1,5 @@
 # Color from CRISM
-Python scripts to generate color parameter products from CRISM images.
+Python scripts to replicate human color vision from CRISM images.
 
 ## Requirements
 
@@ -8,7 +8,7 @@ Python scripts to generate color parameter products from CRISM images.
 
 ## Description
 
-This Python package converts a Compact Reconnaissance Imaging Spectrometer for Mars (CRISM) data cube and converts a given wavelength range into sRGB space using the CIE color matching functions. For the visible wavelength range, this is a close approximation to standard human vision. For other wavelength ranges, this simulates the standard human visual response for that wavelength range. Currently, this package is only capable of processing Map-projected Targed Reduced Data Records (MTRDR), which represent the highest level of processing by the CRISM team. MTRDR images are map-projected, have the instruments 3 detectors joined into a single image, and are processed to reduce signal from atmospheric features (water ice/dust) and instrumental artifacts.
+This Python package converts a Compact Reconnaissance Imaging Spectrometer for Mars (CRISM) data cube and integrates across a given wavelength range using the CIE color matching functions before conversion into sRGB color space. For the visible wavelength range, this is a close approximation to standard human vision. For other wavelength ranges, this simulates the standard human visual response for that wavelength range. Currently, this package is only capable of processing Map-projected Targed Reduced Data Records (MTRDR), which represent the highest level of processing by the CRISM team. MTRDR images are map-projected, have the instruments 3 detectors joined into a single image, and are processed to reduce signal from atmospheric features (water ice/dust) and instrumental artifacts.
 
 This code was developed to aid visualization of hyperspectral imaging data. It is free for personal use and academic presentations and publications. Please provide an acknowledgement in your visualization/presentation/publication when using this work.
 
