@@ -295,7 +295,7 @@ def color_from_cube(cube, cs, mode="raw"):
 
 def mtrdr_to_color(file, name, standard_params=True, new_params=None):
 
-    a = rasterio.open("new.cub",mode='r+',driver='ISIS3')
+    a = rasterio.open(file,mode='r+',driver='ISIS3')
     img = a.read()
     a.close()
     cs = cs_srgb
