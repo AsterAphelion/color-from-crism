@@ -18,7 +18,7 @@ class ColourSystem:
     its three primary illuminants and its "white point"."""
 
     # The CIE colour matching function for 380 - 780 nm in 5 nm intervals
-    cmf = np.loadtxt('mtrdr-cie-cmf.txt', usecols=(1,2,3))
+    cmf = np.loadtxt('cie-cmf.txt', usecols=(1,2,3))
 
     def __init__(self, red, green, blue, white):
         """Initialise the ColourSystem object.
