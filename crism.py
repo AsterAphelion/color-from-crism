@@ -1,7 +1,7 @@
 import rasterio
 import numpy as np
 import spectres as spec
-import png
+import fire
 
 #Initialize color_system.py (this segment of code by 'christian' on the SciPython blog)
 #See: https://scipython.com/blog/converting-a-spectrum-to-a-colour/
@@ -295,9 +295,10 @@ def color_from_cube(cube, cs, mode="raw"):
 
 def mtrdr_to_color(file, name, standard_params=True, new_params=None):
 
-    a = rasterio.open(file,mode='r+',driver='ISIS3')
-    img = a.read()
-    a.close()
+    with rasterio.open(file) as src:
+        profile = src.profile
+        img = src.read()
+
     cs = cs_srgb
 
     #Make null values = 0 so that it doesn't break when doing rgb conversion
@@ -306,6 +307,13 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
     img[img >= 1] = 0
 
     img = format_mtrdr(img)
+
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        photometric = 'RGB',
+        driver = 'PNG'
+    )
     
     if standard_params == True:
         process_list = ["VIS", "FAL", "FEM", "MAF", "PHY", "FAR", "CAR"]
@@ -349,7 +357,8 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
             cube = color_from_cube(cube, cs, mode=mode)
 
             #Export PNG file
-            png.fromarray(cube, mode="RGB;16").save(name+"_"+param+".png")
+            with rasterio.open(name+"_"+param+".png", 'w', **profile) as out:
+                out.write(cube)
             
     if new_params != None:
         
@@ -363,7 +372,11 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
                 cube = mtrdr_crop_bands(img, item)
                 ColourSystem.cmf = mtrdr_color_matching(item)
                 cube = color_from_cube(cube, cs, mode=mode)
-                
-                png.fromarray(cube, mode="RGB;16").save(name+"_"+str(item[0])+"_"+str(item[1])+".png")
+                with rasterio.open(name+"_"+str(item[0])+"_"+str(item[1])+".png", 'w', **profile) as out:
+                    out.write(cube)
     
-    return
+    pass
+
+
+if __name__ == '__main__':
+  fire.Fire()
