@@ -244,6 +244,7 @@ def color_from_cube(cube, cs, mode="raw"):
 
     #Convert the wavelength range to RGB values. If this can be broadcast this would
     #run much more quickly.
+    # todo: this operation can be done must faster with numpy and broadcasting ufuncs
     for pixel in range(0, pixels):
         clone_cube[pixel] = cs.spec_to_rgb(cube[pixel])
         
@@ -283,9 +284,8 @@ def color_from_cube(cube, cs, mode="raw"):
      
     #Add luminance data to cube
     clone_cube = clone_cube * lumin[:, np.newaxis]
-
-    #Reshape array to original shape (cols multiplied by 3 to hold the RGB color values).
-    cube = clone_cube.reshape(rows, cols * 3)
+    #Reshape array to original shape (but now with just 3 bands to hold the RGB color values).
+    cube = clone_cube.reshape(rows, cols, 3).transpose(2, 0, 1)
     
     #Convert sRGB space values to unsigned 16-bit
     cube = cube * 65535
@@ -298,7 +298,6 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
     with rasterio.open(file) as src:
         profile = src.profile
         img = src.read()
-
     cs = cs_srgb
 
     #Make null values = 0 so that it doesn't break when doing rgb conversion
@@ -311,7 +310,6 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
     profile.update(
         dtype = rasterio.uint16,
         count = 3,
-        photometric = 'RGB',
         driver = 'PNG'
     )
     
@@ -355,7 +353,6 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
             cube = mtrdr_crop_bands(img, wave_range)
             ColourSystem.cmf = mtrdr_color_matching(wave_range)
             cube = color_from_cube(cube, cs, mode=mode)
-
             #Export PNG file
             with rasterio.open(name+"_"+param+".png", 'w', **profile) as out:
                 out.write(cube)
