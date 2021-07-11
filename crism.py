@@ -1,7 +1,7 @@
 import rasterio
 import numpy as np
 import spectres as spec
-import png
+import fire
 
 #Initialize color_system.py (this segment of code by 'christian' on the SciPython blog)
 #See: https://scipython.com/blog/converting-a-spectrum-to-a-colour/
@@ -18,7 +18,7 @@ class ColourSystem:
     its three primary illuminants and its "white point"."""
 
     # The CIE colour matching function for 380 - 780 nm in 5 nm intervals
-    cmf = np.loadtxt('mtrdr-cie-cmf.txt', usecols=(1,2,3))
+    cmf = np.loadtxt('cie-cmf.txt', usecols=(1,2,3))
 
     def __init__(self, red, green, blue, white):
         """Initialise the ColourSystem object.
@@ -244,6 +244,7 @@ def color_from_cube(cube, cs, mode="raw"):
 
     #Convert the wavelength range to RGB values. If this can be broadcast this would
     #run much more quickly.
+    # todo: this operation can be done must faster with numpy and broadcasting ufuncs
     for pixel in range(0, pixels):
         clone_cube[pixel] = cs.spec_to_rgb(cube[pixel])
         
@@ -283,9 +284,8 @@ def color_from_cube(cube, cs, mode="raw"):
      
     #Add luminance data to cube
     clone_cube = clone_cube * lumin[:, np.newaxis]
-
-    #Reshape array to original shape (cols multiplied by 3 to hold the RGB color values).
-    cube = clone_cube.reshape(rows, cols * 3)
+    #Reshape array to original shape (but now with just 3 bands to hold the RGB color values).
+    cube = clone_cube.reshape(rows, cols, 3).transpose(2, 0, 1)
     
     #Convert sRGB space values to unsigned 16-bit
     cube = cube * 65535
@@ -295,9 +295,9 @@ def color_from_cube(cube, cs, mode="raw"):
 
 def mtrdr_to_color(file, name, standard_params=True, new_params=None):
 
-    a = rasterio.open(file,mode='r+',driver='ISIS3')
-    img = a.read()
-    a.close()
+    with rasterio.open(file) as src:
+        profile = src.profile
+        img = src.read()
     cs = cs_srgb
 
     #Make null values = 0 so that it doesn't break when doing rgb conversion
@@ -306,6 +306,12 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
     img[img >= 1] = 0
 
     img = format_mtrdr(img)
+
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        driver = 'PNG'
+    )
     
     if standard_params == True:
         process_list = ["VIS", "FAL", "FEM", "MAF", "PHY", "FAR", "CAR"]
@@ -347,9 +353,9 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
             cube = mtrdr_crop_bands(img, wave_range)
             ColourSystem.cmf = mtrdr_color_matching(wave_range)
             cube = color_from_cube(cube, cs, mode=mode)
-
             #Export PNG file
-            png.fromarray(cube, mode="RGB;16").save(name+"_"+param+".png")
+            with rasterio.open(name+"_"+param+".png", 'w', **profile) as out:
+                out.write(cube)
             
     if new_params != None:
         
@@ -363,7 +369,11 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
                 cube = mtrdr_crop_bands(img, item)
                 ColourSystem.cmf = mtrdr_color_matching(item)
                 cube = color_from_cube(cube, cs, mode=mode)
-                
-                png.fromarray(cube, mode="RGB;16").save(name+"_"+str(item[0])+"_"+str(item[1])+".png")
+                with rasterio.open(name+"_"+str(item[0])+"_"+str(item[1])+".png", 'w', **profile) as out:
+                    out.write(cube)
     
-    return
+    pass
+
+
+if __name__ == '__main__':
+  fire.Fire()
