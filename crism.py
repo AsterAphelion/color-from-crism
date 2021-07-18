@@ -18,7 +18,7 @@ class ColourSystem:
     its three primary illuminants and its "white point"."""
 
     # The CIE colour matching function for 380 - 780 nm in 5 nm intervals
-    cmf = np.loadtxt('cie-cmf.txt', usecols=(1,2,3))
+    cmf = np.loadtxt('matching_functions/cie-cmf.txt', usecols=(1,2,3))
 
     def __init__(self, red, green, blue, white):
         """Initialise the ColourSystem object.
@@ -88,17 +88,36 @@ cs_srgb = ColourSystem(red=xyz_from_xy(0.64, 0.33),
                        white=illuminant_D65)
 
 
-#Defining a few internal functions to help us on our journey.
+##Defining a few internal functions to help us on our journey.
+
+#Some frequently-used few-liner functions
 def find_band(array, value):
     """One-liner to find the index value of the nearest band to a given 
     wavelength value."""
     idx = (np.abs(array - value)).argmin()
     return idx
 
+def quicknorm(data):
+    data = (data-np.amin(data))/np.amax(data)
+    return data
 
-def mtrdr_crop_bands(image_cube, wave_list):
+def calculate_luminance(weights, cube):
+    """Function to calculate an image through a filter given the filter transmission properties
+    (weights) from a cube."""
+    weights = weights/np.sum(weights)
+    lumin = np.average(cube, axis=2, weights=weights)    
+    return(lumin)
+
+def convert_uint16(cube):
+    """Converts cube data (float format) to 16-bit unsigned integer."""
+    cube = cube * 65535
+    cube = cube.astype(np.uint16)
+    return(cube)
+
+#MTRDR pre-processing functions
+def modify_mtrdr_axis():
     """Crops the image cube to the given wavelength range."""
-    mtrdr_axis = np.genfromtxt("mtrdr_axis.tab", delimiter=",")
+    mtrdr_axis = np.genfromtxt("matching_functions/mtrdr_axis.tab", delimiter=",")
     mtrdr_axis = mtrdr_axis[:,2]
     
     #Fill in the gaps where bad bands are present
@@ -112,9 +131,15 @@ def mtrdr_crop_bands(image_cube, wave_list):
     bad_band_fill = np.around(bad_band_fill, decimals=2)
     mtrdr_axis = np.insert(mtrdr_axis, 40, bad_band_fill, axis=0)
     
-    new_short = find_band(mtrdr_axis, wave_list[0])
-    new_long = find_band(mtrdr_axis, wave_list[1])
-    crop_cube = image_cube[new_short:new_long, :, :]
+    return(mtrdr_axis)
+
+def mtrdr_crop_bands(image_cube, wave_list):
+    """Crops the image cube to the given wavelength range."""
+    mtrdr_axis = modify_mtrdr_axis()
+    
+    short = find_band(mtrdr_axis, wave_list[0])
+    long = find_band(mtrdr_axis, wave_list[1])
+    crop_cube = image_cube[short:long, :, :]
     
     return(crop_cube)
     
@@ -123,117 +148,122 @@ def mtrdr_color_matching(wave_list):
     #Import CIE color matching function
     #Index 0 - wavelengths, Index 1 - red matching function
     #Index 2 - green matching function, Index 3 - blue matching function
-    cie_matrix = np.genfromtxt("cie-cmf.txt")
+    cie_matrix = np.genfromtxt("matching_functions/cie-cmf.txt")
 
     #Import tab-delimited file of wavelength axis
-    mtrdr_axis = np.genfromtxt("mtrdr_axis.tab", delimiter=",")
-    mtrdr_axis = mtrdr_axis[:,2]
+    mtrdr_axis = modify_mtrdr_axis()
     
-    ##Fill in the gaps where bad bands are present
-    #Blue gap - 380-436 nm
-    add_waves = np.linspace(377.58, 429.62, num=9)
-    mtrdr_axis = np.concatenate((add_waves, mtrdr_axis))
+    #Find mtrdr axis indices with closest values to user-specified values.
+    short = find_band(mtrdr_axis, wave_list[0])
+    long = find_band(mtrdr_axis, wave_list[1])
     
-    #NIR bad bands 637-710 nm
-    bad_band_fill = np.linspace(637.96, 703.1, num=10)
-    mtrdr_axis = np.insert(mtrdr_axis, 40, bad_band_fill, axis=0)
-    mtrdr_axis = np.around(mtrdr_axis, decimals=2)
+    ##Now use normalization to rescale wavelength axis of CIE color matching functions
+    #to user-specified wavelength range...
+    cie_matrix[:,0] = (mtrdr_axis[long] - mtrdr_axis[short]) / (cie_matrix[-1,0] - cie_matrix[0,0]) * (cie_matrix[:,0]-cie_matrix[-1,0]) + mtrdr_axis[long]
     
-    ##Now to figure out where on the user-specified wavelength
-    #range falls on the mtrdr axis by finding indices with closest
-    #value.
-    new_short = find_band(mtrdr_axis, wave_list[0])
-    new_long = find_band(mtrdr_axis, wave_list[1])
+    #..then resample CIE function values using MTRDR axis values
+    red = spec.spectres(mtrdr_axis[short:long], cie_matrix[:,0], cie_matrix[:,1], fill=0, verbose=False)
+    green = spec.spectres(mtrdr_axis[short:long], cie_matrix[:,0], cie_matrix[:,2], fill=0, verbose=False)
+    blue = spec.spectres(mtrdr_axis[short:long], cie_matrix[:,0], cie_matrix[:,3], fill=0, verbose=False)
     
-    ##Now rescale CIE color matching function to user-specified wavelength range
-    cie_matrix[:,0] = (mtrdr_axis[new_long] - mtrdr_axis[new_short]) / (cie_matrix[-1,0]-cie_matrix[0,0]) * (cie_matrix[:,0]-cie_matrix[-1,0]) + mtrdr_axis[new_long]
-    red = spec.spectres(mtrdr_axis[new_short:new_long], cie_matrix[:,0], cie_matrix[:,1], fill=0, verbose=False)
-    green = spec.spectres(mtrdr_axis[new_short:new_long], cie_matrix[:,0], cie_matrix[:,2], fill=0, verbose=False)
-    blue = spec.spectres(mtrdr_axis[new_short:new_long], cie_matrix[:,0], cie_matrix[:,3], fill=0, verbose=False)
+    #Concatenate the results
     new_mat = np.stack([red, green, blue], axis=-1)
     return(new_mat)
 
-def format_mtrdr(img_cube):
-    """Prepare MTRDR data cube for color production by filling in bad bands."""
-    axis = np.genfromtxt("mtrdr_axis.tab", delimiter=",")
-    waves = axis[:,2]
+
+def format_mtrdr(cube):
+    """Prepare MTRDR data cube for color production by filling in missing bands."""
     
-    #First step - create some new channels mirroring the actual CRISM channel
-    #spacing to fill the gap from 436 nm back to 377 nm. Doing this by averaging
-    #the first six channels to reduce noise when we start subtracting a slope from
-    #these channels later.
-    add_waves = np.linspace(377.58, 429.62, num=9)
-    add_waves = np.around(add_waves, decimals=2)
+    ##Grab the modified MTRDR axis. To document some index values I'm using in this function:
+    #Indices 0-9 in this axis represent the 377-436 nm channels, which need to be calculated 
+    #through extrapolation and are needed to produce the blue channel in the color output. 
+    #Indices 40-50 represent the missing 631-709 nm channels, needed to produce the red channel 
+    #in the color output. 
+    mtrdr_axis = modify_mtrdr_axis()
+    
+    ##Extrapolate the missing bands (377-436 nm) necessary for blue. To do this, I am 
+    #creating a dummy channel by averaging the values from the first six bands. This creates
+    #an array of 9 copies of the average of the first 6 valid bands. Later I will subtract
+    #a slope constant subtracted from each band to extrapolate the radiance of each band in
+    #this wavelength range.
+    interp_channel = np.average(cube[0:6], axis=0)
+    interp_channel = np.tile(interp_channel, (9,1,1))
+    
+    #Band-to-band noise is reduced by calculating the slope from three channel pairs and 
+    #averaging the result. This step produces a blue slope for each pixel in the image.
+    slope = (cube[2] - cube[6]) / (mtrdr_axis[6] - mtrdr_axis[2])
+    slope2 = (cube[1] - cube[5]) / (mtrdr_axis[5] - mtrdr_axis[1])
+    slope3 = (cube[0] - cube[4]) / (mtrdr_axis[4] - mtrdr_axis[0])
+    slope = (slope + slope2 + slope3) / 3
+    
+    #Next, we tile the slope so that the array shape matches the number of bands we need to
+    #fill in, then multiply the slope by the distance from the first good band. The resulting
+    #array is then added to the dummy bands to produce the extrapolated data array.
+    slope = np.tile(slope, (9,1,1))
+    multiplier = mtrdr_axis[9] - mtrdr_axis[0:9]
+    multiplier = multiplier[:, np.newaxis, np.newaxis]
+    slope = slope * multiplier
+    interp_channel += slope
+    
+    cube = np.concatenate((interp_channel, cube), axis=0)
+    
+    #Now repeat the process to fill in the VIS-NIR bad bands.
+    interp_channel = np.tile(cube[39], (10,1,1))
 
-    #Assigning the new wavelength axis to a new object for the moment because we
-    #still need the old one for the next steps.
-    new_waves = np.concatenate((add_waves, waves))
-
-    interp_channels = np.empty((9, img_cube.shape[1], img_cube.shape[2]))
-    interp_channels[0:9,:,:] = np.average(img_cube[0:6], axis=0)
-
-    #Second step - find blue slope. Another noise-reduction step I'm taking here is
-    #to find several different slopes using different pairs of channels and averaging
-    #the result.
-    slope = (img_cube[2] - img_cube[6]) / (waves[6] - waves[2])
-    slope2 = (img_cube[1] - img_cube[5]) / (waves[5] - waves[1])
-    slope3 = (img_cube[0] - img_cube[4]) / (waves[4] - waves[0])
+    slope = (cube[37] - cube[40])/(mtrdr_axis[50] - mtrdr_axis[39])
+    slope2 = (cube[38] - cube[41])/(mtrdr_axis[51]- mtrdr_axis[38])
+    slope3 = (cube[39] - cube[42])/(mtrdr_axis[52]- mtrdr_axis[37])
     slope = (slope + slope2 + slope3) / 3
 
-    #Third step - creating a new array with the amount that needs to be added/subtracted
-    #from the extrapolated channels. 
-    slope = np.broadcast_to(slope, (9, slope.shape[0], slope.shape[1]))
-    multiplier = (waves[0] - add_waves)
+    slope = np.tile(slope, (10, 1, 1))
+    multiplier = mtrdr_axis[40:50] - mtrdr_axis[39]
     multiplier = multiplier[:, np.newaxis, np.newaxis]
     slope = slope * multiplier
 
-    #Fourth step - do the math and slap it in
-    interp_channels = interp_channels + slope
-    img_cube = np.concatenate((interp_channels, img_cube), axis=0)
+    interp_channel += slope
     
-    #Removing for memory management
-    del interp_channels
-
-    #Now we can reassign new_waves back to the original waves object since we're done with it.
-    waves = new_waves
-
-    #Repeating the previous steps, but this time filling in the VIS-NIR bad bands.
-    bad_band_fill = np.linspace(637.96, 703.1, num=10)
-    bad_band_fill = np.around(bad_band_fill, decimals=2)
-
-    interp_channels = np.empty((10, img_cube.shape[1], img_cube.shape[2]))
-    interp_channels[0:10,:,:] = img_cube[39]
-
-    slope = (img_cube[40] - img_cube[39])/(waves[40] - waves[39])
-
-    slope = np.broadcast_to(slope, (10, slope.shape[0], slope.shape[1]))
-    multiplier = (bad_band_fill - waves[39]) 
-    multiplier = multiplier[:, np.newaxis, np.newaxis]
-    slope = slope * multiplier
-
-    interp_channels = interp_channels + slope
+    #Now to insert the VIS-NIR bad bands into the array. This might be faster and more 
+    #memory efficient using np.insert, but my brain hurts trying to figure out that function. 
+    #So for now, using the inefficient way.
     
-    #Splitting up the array so we can merge everything
     #Blue side of the bad bands
-    short = img_cube[0:40]
+    short = cube[0:40]
     #Red side of the bad bands
-    long = img_cube[40::]
+    long = cube[40::]
 
-    intermed = np.concatenate((short,interp_channels), axis=0)
+    intermed = np.concatenate((short, interp_channel), axis=0)
+    cube = np.concatenate((intermed, long), axis=0)
     
-    #Removing for memory management
-    del interp_channels
-    
-    img_cube = np.concatenate((intermed, long), axis=0)
-    waves = np.insert(waves, 40, bad_band_fill, axis=0)
-    
-    return(img_cube)
+    return(cube)
 
 def color_from_cube(cube, cs, mode="raw"):
+    """Core functionality for calculating human perceptual color from CRISM MTRDR."""
     #Transpose array to put the wavelength axis last - personal preference
     cube = cube.transpose(1,2,0)
+    
+    #We will lose luminance data once we calculate chromaticity, so before transforming the shape
+    #of the data cube, I'm going to calculate luminance images by scaling the brightness of each band
+    #by the CIE scaling factor at that band, then integrating across the entire wavelength range.
+    
+    #I'm doing this step here because when calculating color from spacecraft filters in other functions
+    #the data cubes remain three-dimensional. It's easier to run this step here while the cube is still
+    #three-dimensional than it is to add a dimensionality argument to calculate_luminance() and specify
+    #the dimensionality of the data every time.
+    
+    weights = cs.cmf.copy()
+    
+    blu_lumin = calculate_luminance(weights[:,0], cube)
+    grn_lumin = calculate_luminance(weights[:,1], cube)
+    red_lumin = calculate_luminance(weights[:,2], cube)
+    
+    #Merge luminance cubes together, then perform a contrast stretch. Adding 2% buffers to the minimum
+    #and maximum values to avoid histogram clipping.
+    lumin = np.stack((blu_lumin, grn_lumin, red_lumin), axis=0)
+    lumin = (lumin - (np.amin(lumin) - (0.02*np.amin(lumin)))) / ((np.amax(lumin) + (0.02*np.amax(lumin))))
 
-    #Reorganizing the pixels to 1-D to speed up a loop we'll be doing in a moment.
+    #Now reshape the data array so that it's one dimensional and runs more quickly in the loop that
+    #calculates chromaticity values (I'm not sure if the chromaticity calculation can be set up to take
+    #advantge of broadcasting ufuncs. 
     rows = cube.shape[0]
     cols = cube.shape[1]
     pixels = rows*cols
@@ -248,52 +278,40 @@ def color_from_cube(cube, cs, mode="raw"):
     for pixel in range(0, pixels):
         clone_cube[pixel] = cs.spec_to_rgb(cube[pixel])
         
-    #An issue with the color conversion is that color values typically integrate well out
-    #of the [0-1] normalized range of color values (typical output values for red in Mars
-    #images typically seem to be in the 2-3 range). If left to the ColourSystem class, each
-    #pixel would be normalized independently and we would end up with no relative color 
-    #information for the red band. So I stripped that out of the original class definition
-    #and we're going to normalize to the [0-1] range differently. "Raw" is a simple normalization
-    #based on the highest overall value , "WB" 
+    #When chromaticity values integrate outside of the [0-1] range, they need to be scaled back to 
+    #that range to be displayed within the chosen colorspace. The ColourSystem class as written by
+    #"Christian" normalized on a per-pixel basis, which destroys relative color information. This was
+    #dealt with by removing a normalization statement from the xyz_to_rgb function within the class
+    #definition.
     
-    def quicknorm(data):
-        data = (data-np.amin(data))/np.amax(data)
-     
-        return data
-    
-    #Simple normalization based on highest overall value. Provides something resembling what an
-    #observer would see.
+    #We still need to normalize back to the [0-1 range], which we're doing here with the quicknorm()
+    #function. "Raw" normalization preserves the relative color channel brightnesses by simply stretching
+    #between the highest chromaticity(typically red) and lowest chromaticity (typically blue) values.
+    #"WB" independently normalizes each color channel, similar to the output provided in the official
+    #CRISM parameter products. 
+
     if mode=="raw":
         clone_cube = quicknorm(clone_cube)
-    
-    #Normalize each channel independently - this is similar to how the VIS/FAL parameter products
-    #work.
+
     if mode=="wb":
         for channel in range(0, clone_cube.shape[1]):
             clone_cube[:,channel] = quicknorm(clone_cube[:,channel])
         
-    #The output from the previous line is color only - no luminance data at all.
-    #So here, we're going to create a luminance frame using the average brightness across
-    #the wavelength range of interest.
-    
-    #Doing a contrast stretch on the data, but making sure that we're not stripping any of the
-    #lights or darks. Subtract 2% from the darkest dark and add 2% from the lightest light.
-    #That way there's a little bit of cushion.
-    lumin = np.average(cube, axis=1)
-    lumin = (lumin - (np.amin(lumin) - (0.02*np.amin(lumin)))) / ((np.amax(lumin) + (0.02*np.amax(lumin))))
-     
-    #Add luminance data to cube
-    clone_cube = clone_cube * lumin[:, np.newaxis]
-    #Reshape array to original shape (but now with just 3 bands to hold the RGB color values).
+    #Reshape pixels back to original x,y orientation
     cube = clone_cube.reshape(rows, cols, 3).transpose(2, 0, 1)
     
-    #Convert sRGB space values to unsigned 16-bit
-    cube = cube * 65535
-    cube = cube.astype(np.uint16)
+    #Add luminance data to cube
+    cube[0,:,:] = cube[0,:,:] * lumin[0]
+    cube[1,:,:] = cube[1,:,:] * lumin[1]
+    cube[2,:,:] = cube[2,:,:] * lumin[2]
+    
+    #Convert to unsigned 16-bit
+    cube = convert_uint16(cube)
     
     return(cube)
 
 def mtrdr_to_color(file, name, standard_params=True, new_params=None):
+    """Function to produce perceptually-accurate color from CRISM MTRDR data."""
 
     with rasterio.open(file) as src:
         profile = src.profile
@@ -374,6 +392,226 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
     
     pass
 
+
+def mtrdr_to_mastcam(file, fname, narrowband=True):
+    
+    ##Data I/O and formatting
+    with rasterio.open(file) as src:
+        profile = src.profile
+        cube = src.read()
+    
+    cube = format_mtrdr(cube)
+    cube = mtrdr_crop_bands(cube, [380, 1200])
+    cube = cube.transpose(1,2,0)
+    cube = np.ma.masked_values(cube, 65535)
+    
+    #Developer note: Mastcam filter responses are stored in the following order:
+    #[0] - wavelength
+    #[1-4] - bayer filters (blue, green, red)
+    #[4] - Left IR-bandcut
+    #[5-12] - Left narrowband filters (L1-L7)
+    #[12] - Right IR-bandcut
+    #[13:] - Right narrowband filters (R1-R7)
+    
+    filter_response = np.genfromtxt("matching_functions/mastcam-response-mtrdr.txt", delimiter="\t")
+    
+    ##Calculate filter images filters via integration
+    
+    blue = calculate_luminance((filter_response[:, 1] * filter_response[:, 4]), cube)
+    green = calculate_luminance((filter_response[:, 2] * filter_response[:,4]), cube)
+    red = calculate_luminance((filter_response[:, 3] * filter_response[:,4]), cube)
+    
+    export = np.stack((red, green, blue))
+    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))
+    filter_name = "RGB"
+    
+    export = convert_uint16(export)
+    
+    #Update profile for color export
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        driver = 'PNG'
+    )
+    
+    with rasterio.open(fname+"_"+filter_name+".png", 'w', **profile) as out:
+                out.write(export)
+    
+    if narrowband == False:
+        return
+    
+    #This section probably does not have the cleanest setup. Would prefer to execute this by iterating through 
+    #filters, but MastCam narrowband filters are obtained by discarding two of the Bayer filters (see Bell 
+    #et al. 2016 for documentation). The Bayer filters which get dropped change filter to filter, so I'm not 
+    #sure I can cleanly iterate through this in a loop.
+    
+    #The Bayer filters are effectively transparent in the NIR and are treated as identically transparent.
+    #Here I will emulate the interpolation by averaging the three Bayer filter bandpasses before applying 
+    #it to the narrowband filter.
+    bayer_response = np.average(filter_response[:, 1:4], axis=1)
+    
+    l1 = calculate_luminance((filter_response[:, 5] * filter_response[:,2]), cube)
+    l2 = calculate_luminance((filter_response[:, 6] * filter_response[:,1]), cube)
+    l3 = calculate_luminance((filter_response[:, 7] * filter_response[:,3]), cube)
+    l4 = calculate_luminance((filter_response[:, 8] * filter_response[:,3]), cube)
+    l5 = calculate_luminance((filter_response[:, 9] * bayer_response), cube)
+    l6 = calculate_luminance((filter_response[:, 10]* bayer_response), cube)
+    
+    r1 = calculate_luminance((filter_response[:,13] * filter_response[:,2]), cube)
+    r2 = calculate_luminance((filter_response[:,14] * filter_response[:,1]), cube)
+    r3 = calculate_luminance((filter_response[:,15] * filter_response[:,3]), cube)
+    r4 = calculate_luminance((filter_response[:, 16]* bayer_response), cube)
+    r5 = calculate_luminance((filter_response[:, 17]* bayer_response), cube)
+    r6 = calculate_luminance((filter_response[:, 18]* bayer_response), cube)
+    
+    
+    filter_list = [l1, l2, l3, l4, l5, l6, r1, r2, r3, r4, r5, r6]
+    filter_names = ["L1_527nm", "L2_445nm", "L3_751nm", "L4_676nm", "L5_867nm",
+                   "L6_1012nm", "R1_527nm", "R2_447nm", "R3_805nm", "R4_908nm",
+                   "R5_937nm", "R6_1013nm"]
+    
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 1,
+        driver = 'PNG'
+    )
+    
+    for item, name in zip(filter_list, filter_names):
+        item = np.expand_dims(item, 0)
+        item = convert_uint16(item)
+        with rasterio.open(fname+"_"+name+".png", 'w', **profile) as out:
+                out.write(item)
+                
+    return
+
+
+def mtrdr_to_hrsc(file, fname, color="IGB", lumin=False):
+    
+    ##Data I/O and formatting
+    with rasterio.open(file) as src:
+        profile = src.profile
+        cube = src.read()
+    
+    cube = format_mtrdr(cube)
+    cube = mtrdr_crop_bands(cube, [380, 1100])
+    cube = cube.transpose(1,2,0)
+    cube = np.ma.masked_values(cube, 65535)
+    
+    #Developer note: HRSC filter responses are stored in the following order:
+    #[0] - MTRDR wavelength; [1] - Nadir; [2] - NIR; [3] - Red; [4] - Green; [5] - Blue;
+    #[6] - Photometry; [7] - Stereo
+    
+    #Approximately 15% of the light entering the HRSC blue filter in the N-UV is not visible
+    #to CRISM, so the filter response is a little different from reality.
+    
+    #Filter information retrieved from the Spanish Virtual Observatory Filter Profile Repository
+    filter_response = np.genfromtxt("matching_functions/hrsc-response-mtrdr.txt", delimiter="\t")
+    
+    ##Calculate filter images filters via integration
+    
+    nad = calculate_luminance((filter_response[:, 1]), cube)
+    nir = calculate_luminance((filter_response[:, 2]), cube)
+    red = calculate_luminance((filter_response[:, 3]), cube)
+    grn = calculate_luminance((filter_response[:, 4]), cube)
+    blu = calculate_luminance((filter_response[:, 5]), cube)
+    pho = calculate_luminance((filter_response[:, 6]), cube)
+    ste = calculate_luminance((filter_response[:, 7]), cube)
+    
+    if color == "IGB":
+        export = np.stack((nir, grn, blu))
+        
+    elif color == "IRB":
+        export = np.stack((nir, red, blu))
+        
+    elif color == "RGB":
+        export = np.stack((red, grn, blu))
+        
+    else:
+        print("Invalid color keyword, use 'IGB', 'IRB', or 'RGB'.")
+    
+    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))    
+    export = convert_uint16(export)
+    
+    #Update profile for color export
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        driver = 'PNG'
+    )
+    
+    with rasterio.open(fname+"_"+color+".png", 'w', **profile) as out:
+                out.write(export)
+    
+    if lumin == False:
+        return
+    
+    filter_list = [nad, nir, red, grn, blu, pho, ste]
+    filter_names = ["ND", "IR", "RED", "GRN", "BLU", "P1", "S1"]
+    
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 1,
+        driver = 'PNG'
+    )
+    
+    for item, name in zip(filter_list, filter_names):
+        item = np.expand_dims(item, 0)
+        item = convert_uint16(item)
+        with rasterio.open(fname+"_"+name+".png", 'w', **profile) as out:
+                out.write(item)
+                
+    return
+
+
+def mtrdr_to_hirise(file, fname, color="IRB"):
+    
+    ##Data I/O and formatting
+    with rasterio.open(file) as src:
+        profile = src.profile
+        cube = src.read()
+    
+    cube = format_mtrdr(cube)
+    cube = mtrdr_crop_bands(cube, [380, 1100])
+    cube = cube.transpose(1,2,0)
+    cube = np.ma.masked_values(cube, 65535)
+    
+    #Developer note: HRSC filter responses are stored in the following order:
+    #[0] - MTRDR wavelength; [1] - NIR; [2] - Red; [3] - Blue-Green
+    
+    #Filter information retrieved from the Spanish Virtual Observatory Filter Profile Repository
+    filter_response = np.genfromtxt("matching_functions/hirise-response-mtrdr.txt", delimiter="\t")
+    
+    ##Calculate filter images filters via integration
+    
+    nir = calculate_luminance((filter_response[:, 1]), cube)
+    red = calculate_luminance((filter_response[:, 2]), cube)
+    bgr = calculate_luminance((filter_response[:, 3]), cube)
+
+    if color == "IRB":
+        export = np.stack((nir, red, bgr))
+        
+    elif color == "RGB":
+        #If RGB is requested, calculate synthetic blue filter according to HiRISE team formula
+        blu = (bgr * 2) - (0.3 * red)
+        export = np.stack((red, bgr, blu))
+        
+    else:
+        print("Invalid color keyword, use 'IRB' or 'RGB'.")
+    
+    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))    
+    export = convert_uint16(export)
+    
+    #Update profile for color export
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        driver = 'PNG'
+    )
+    
+    with rasterio.open(fname+"_"+color+".png", 'w', **profile) as out:
+                out.write(export)
+                
+    return
 
 if __name__ == '__main__':
   fire.Fire()
