@@ -1,39 +1,68 @@
 # Color from CRISM
-Python scripts to replicate human color vision from CRISM images.
+Python scripts to replicate human and spacecraft color vision from CRISM images.
 
 ## Requirements
-
-- ISIS3 (for now)
 - requirements.txt
 
 ## Description
 
-This Python package converts a Compact Reconnaissance Imaging Spectrometer for Mars (CRISM) data cube and integrates across a given wavelength range using the CIE color matching functions before conversion into sRGB color space. For the visible wavelength range, this is a close approximation to standard human vision. For other wavelength ranges, this simulates the standard human visual response for that wavelength range. Currently, this package is only capable of processing Map-projected Targed Reduced Data Records (MTRDR), which represent the highest level of processing by the CRISM team. MTRDR images are map-projected, have the instruments 3 detectors joined into a single image, and are processed to reduce signal from atmospheric features (water ice/dust) and instrumental artifacts.
+This Python package converts a Compact Reconnaissance Imaging Spectrometer for Mars (CRISM) data cube to various color spaces, including human perceptual color and emulated spacecraft filters. It integrates across a given wavelength range using the CIE color matching functions (for human perceptual color) or spacecraft filter functions (for spacecraft color) before conversion into sRGB color space. Currently, this package is only capable of processing Map-projected Targed Reduced Data Records (MTRDR), which represent the highest level of processing by the CRISM team. MTRDR images are map-projected, have the instruments 3 detectors joined into a single image, and are processed to reduce signal from atmospheric features (water ice/dust) and instrumental artifacts.
 
 This code was developed to aid visualization of hyperspectral imaging data. It is free for personal use and academic presentations and publications. Please provide an acknowledgement in your visualization/presentation/publication when using this work.
 
 ## Setup and Use
 
-Install the dependent packages with pip. Copy all files to a new directory. Additionally, this package currently relies on ISIS3 to convert a [CRISM MTRDR image and detached label file](https://pds-geosciences.wustl.edu/missions/mro/crism.htm) to an ISIS3 image cube which can be read with the rasterio package. When downloading an image of interest from the Planetary Data System, the files you will need for successful processing will end with **if**###j_mtr3.img and **if**###j_mtr3.lbl. Then run the ISIS3 command `pds2isis from=\*.lbl to=[name].cub`. 
+Install the dependent packages with pip. Copy all files to a new directory. This program uses the Fire package to implement a command-line interface. To use it, open a terminal in the directory where you copied the files. Type `python crism.py [function] --arg1=[$1] --arg2=[$2]` to run a command. 
 
-Once the MTRDR image is in .cub format, you can run the conversion function in command line with `python -c 'import crism; crism.mtrdr_to_color(fname, output_name)'`. Standard output is the following 7 parameters:
+### For Human Perceptual Color
 
-- 'VIS' - Similar to the official CRISM VIS parameter, covering the wavelength range from 380 - 780 nm
-- 'FAL' - Similar to the official CRISM FAL parameter, covering the wavelength range from 1.1 - 2.2 microns.
-- 'FEM' - "Fe-mineral" capturing the 750 nm - 1.2 micron range due to variations in iron oxidation and mineralogy.
-- 'MAF' - "Mafic minerals" capturing the 800 nm - 2.0 micron range, primarily due to variations in unweathered basaltic minerals.
-- 'PHY' - "Phyllosilicates" capturing the 1.8 - 2.2 micron range, with color strongly dependent on H20 and OH vibrational bands.
-- 'FAR' - Integrates across the 2.8 - 3.9 micron spectral range of the CRISM longwave sensor. Sensor was prone to light leaks, not all images are usable.
-- 'CAR' - "Carbonates" capturing the 2.9 - 3.4 micron spectral range, color somewhat dependent on the presence of carbonates. Same caveat as above.
+The `mtrdr_to_color()` function uses the CIE color matching functions as a close approximation to standard human vision. Additional keyword arguments can be used to apply the matching function to a user-specified wavelength range, emulating the standard human visual response for that wavelength range. 
 
-If you would not like the above standard outputs, add `standard_params=False` to the mtrdr_to_color inputs. 
+User input: `python crism.py mtrdr_to_color --file="[cube_name].lbl" --name="[output_name]"`. The standard outputs from this function include the following:
 
-If you would like to use your own wavelength ranges, add `new_params=[[wave1, wave2], [wave1, wave2]...]` to the mtrdr_to_color inputs. To find wavelength ranges which may highlight interesting mineralogy, see [Vivano-Beck (2014)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2014JE004627), which discusses the spectral signals of various common Mars minerals.
+- 'VIS' - CIE human visual response, covering the wavelength range from 380 - 780 nm
+- 'FAL' - Human visual response shifted to 1.1 - 2.2 microns, covering range of CRISM FAL parameter.
+- 'FEM' - Human visual response shifted to 750 - 1.2 microns, capturing color variability in iron oxidation and Fe-rich mineralogy.
+- 'MAF' - Human visual response shifted to 800 - 2.0 microns, capturing color variability in unweathered basaltic minerals.
+- 'PHY' - Human visual response shifted to 1.8 - 2.2 microns, with color strongly dependent on presence of H20 and OH vibrational bands (hydrated minerals). 
+- 'FAR' - Human visual response shifted to 2.8 - 3.9 microns, spanning range of CRISM longwave sensor. Sensor prone to light leaks, not all images are usable. 
+- 'CAR' - Human visual response shifted to 2.9 - 3.4 microns, color somewhat dependent on presence of carbonate minerals. Same caveat as "FAR" applies. 
+
+If you would not like the above standard outputs, add `--standard_params=False` to the mtrdr_to_color inputs. 
+
+If you would like to specify a custom wavelength range, add `--new_params=[[wave1, wave2], [wave1, wave2]...]` to the mtrdr_to_color inputs. To find wavelength ranges which may highlight interesting mineralogy, see [Vivano-Beck (2014)](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1002/2014JE004627), which discusses the spectral signals of various common Mars minerals.
+
+### For Spacecraft Filter Color
+***Work in Progress***
+Several functions are provided to calculate color data returned from various spacecraft. As of the current version, color information can be calculated for the following spacecraft instruments.
+
+- Mars Reconnaissance Orbiter HiRISE
+- Mars Express HRSC
+- Curiosity MastCam
+
+This functionality is still experimental, and may not be radiometrically-accurate. In addition, function control flow is still being worked out.
+
+#### Mars Express HRSC
+To calculate HRSC images, use `mtrdr_to_hrsc --file="[cube_name].lbl" --fname="[output_name]"`. Standard output returns an IGB (NIR-GRN-BLU) color image and grayscale images through the spacecraft's Nadir, NIR, RED, GRN, BLU, P1, and S1 filters. 
+
+To change color image combinations, add `--color=[kwarg]` to the command. Kwargs are "IGB" (NIR-GRN-BLU), "IRB" (NIR-RED-BLU), and "RGB" (RED-GRN-BLU)
+
+If grayscale images are not desired, add `--lumin=False` to the command.
+
+#### Mars Reconnaissance Orbiter HiRISE
+To calculate HiRISE images, use `mtrdr_to_hirise --file="[cube_name].lbl" --fname="[output_name]"`. Standard output returns an IRB (NIR-RED-BGR) color image.
+
+To output an RGB color product, add `--color="RGB"` to the command.
+
+#### Curiosity MastCam
+To calculate MastCam images, use `mtrdr_to_mastcam --file="[cube_name].lbl" --fname="output_name"`. Standard output returns an RGB image equivalent to standard bayer-filtered MastCam color images and grayscale images equivalent to images taken through narrowband filters L1-L6 and R1-R6. 
+
+If narrowband filter images are not desired, add `--narrowband=False` to the `mtrdr_to_mastcam` inputs.
+
 
 ## Future improvements
 
-- **Remove dependency on ISIS3** - Adding a PDS file parser to the package could remove the dependency for ISIS3, as well as rasterio. Unfortunately I am not currently aware of a lightweight package that can read MTRDR files from the detached label.
+- Continue implementing color-matching functions for various spacecraft filters, double-check to make sure method is radiometrically accurate.
 
 ## Acknowledgements
 This code makes heavy use of the 'ColourSystem' class [described on the SciPython blog](https://scipython.com/blog/converting-a-spectrum-to-a-colour/). It also uses the [SpectRes package](https://spectres.readthedocs.io/en/latest/) to convert CIE matching functions to different wavelength ranges. 
-
