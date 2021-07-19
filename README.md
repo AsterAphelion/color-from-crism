@@ -45,7 +45,7 @@ Several functions are provided to calculate color data returned from various spa
 
 This functionality is still experimental, and may not be radiometrically accurate. In addition, function control flow is still being worked out. Suggestions welcome!
 
-### Trace Gas Orbiter CaSSIS
+#### Trace Gas Orbiter CaSSIS
 To calculate CaSSIS images, use `mtrdr_to_cassis --file="[cube_name].lbl" --fname="output_name"`. Standard output returns an IPG (NIR-PAN-BLU) color image. To change color combinations, use `--color=[kwarg]`. Currently supported combinations are "IRB" (RED-PAN-BLU) and "ENH" (a band-ratio image with the following ratios: R - RED/PAN; G - PAN/BLU; B - PAN/NIR)
 
 #### Mars Express HRSC
