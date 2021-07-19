@@ -36,11 +36,17 @@ If you would like to specify a custom wavelength range, add `--new_params=[[wave
 ***Work in Progress***
 Several functions are provided to calculate color data returned from various spacecraft. As of the current version, color information can be calculated for the following spacecraft instruments.
 
+- Trace Gas Orbiter CaSSIS
 - Mars Reconnaissance Orbiter HiRISE
 - Mars Express HRSC
-- Curiosity MastCam
+- Curiosity Mastcam
+- Perseverance Mastcam-Z
+- Mars Exploration Rover Pancam
 
-This functionality is still experimental, and may not be radiometrically-accurate. In addition, function control flow is still being worked out.
+This functionality is still experimental, and may not be radiometrically accurate. In addition, function control flow is still being worked out. Suggestions welcome!
+
+### Trace Gas Orbiter CaSSIS
+To calculate CaSSIS images, use `mtrdr_to_cassis --file="[cube_name].lbl" --fname="output_name"`. Standard output returns an IPG (NIR-PAN-BLU) color image. To change color combinations, use `--color=[kwarg]`. Currently supported combinations are "IRB" (RED-PAN-BLU) and "ENH" (a band-ratio image with the following ratios: R - RED/PAN; G - PAN/BLU; B - PAN/NIR)
 
 #### Mars Express HRSC
 To calculate HRSC images, use `mtrdr_to_hrsc --file="[cube_name].lbl" --fname="[output_name]"`. Standard output returns an IGB (NIR-GRN-BLU) color image and grayscale images through the spacecraft's Nadir, NIR, RED, GRN, BLU, P1, and S1 filters. 
@@ -52,17 +58,31 @@ If grayscale images are not desired, add `--lumin=False` to the command.
 #### Mars Reconnaissance Orbiter HiRISE
 To calculate HiRISE images, use `mtrdr_to_hirise --file="[cube_name].lbl" --fname="[output_name]"`. Standard output returns an IRB (NIR-RED-BGR) color image.
 
-To output an RGB color product, add `--color="RGB"` to the command.
+Additional color output options can be accessed with the `--color=[kwarg]` option. Kwargs are "RGB" (RED-BGR-Synthetic Blue, with synthetic blue image calculated using the HiRISE team formulation) and "ENH" (a band-ratio image with the following ratios: R - NIR/RED; G - NIR/BGR, B - RED/BGR).
 
-#### Curiosity MastCam
-To calculate MastCam images, use `mtrdr_to_mastcam --file="[cube_name].lbl" --fname="output_name"`. Standard output returns an RGB image equivalent to standard bayer-filtered MastCam color images and grayscale images equivalent to images taken through narrowband filters L1-L6 and R1-R6. 
+#### Curiosity Mastcam
+To calculate Mastcam images, use `mtrdr_to_mastcam --file="[cube_name].lbl" --fname="output_name"`. Standard output returns an RGB image equivalent to standard bayer-filtered Mastcam color images and grayscale images equivalent to images taken through narrowband filters L1-L6 and R1-R6. 
 
 If narrowband filter images are not desired, add `--narrowband=False` to the `mtrdr_to_mastcam` inputs.
+
+#### Perseverance Mastcam-Z
+To calculate Mastcam-Z images, use `mtrdr_to_mastcamz --file="[cube_name].lbl" --fname="output_name"`. Standard output returns an RGB image equivalent to standard bayer-filtered Mastcam color images and grayscale images equivalent to images taken through narrowband filters L1-L6 and R2-R6. 
+
+If narrowband filter images are not desired, add `--narrowband=False` to the `mtrdr_to_mastcamz` inputs.
+
+#### Mars Exploration Rover PanCam
+To calculate PanCam images, use `mtrdr_to_pancam --file="[cube_name].lbl" --fname="output_name"`. Standard output returns a natural-color RGB image using the L3-5-7 combination and grayscale images for filters L1-L7 and R1-R7. 
+
+`--color="IRB"` can be used to access the L2-5-7 combination commonly used by the rover team for geological documentation imagery.
+
+If narrowband filter images are not desired, add `narrowband=False` to the `mtrdr_to_pancam` inputs.
 
 
 ## Future improvements
 
 - Continue implementing color-matching functions for various spacecraft filters, double-check to make sure method is radiometrically accurate.
+- Condense code for spacecraft filter combination if possible.
+- Refine spacecraft filter outputs to be more user-friendly.
 
 ## Acknowledgements
 This code makes heavy use of the 'ColourSystem' class [described on the SciPython blog](https://scipython.com/blog/converting-a-spectrum-to-a-colour/). It also uses the [SpectRes package](https://spectres.readthedocs.io/en/latest/) to convert CIE matching functions to different wavelength ranges. 
