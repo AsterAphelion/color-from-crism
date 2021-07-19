@@ -104,8 +104,33 @@ def quicknorm(data):
 def calculate_luminance(weights, cube):
     """Function to calculate an image through a filter given the filter transmission properties
     (weights) from a cube."""
+    ##Design philosophy: I am integrating the filter bandpass by first multiplying each cube channel
+    #by the filter transmission at that channel, then summing the result. To maintain the relative 
+    #brighnesses of each filter, I then find the average I/F value for the wavelength range spanned by
+    #the cube, and then add an offset value to the calculated filter.
+    
+    #This is mostly to make sure that the weights work for low transmission filters. Setup for later
+    #before we modify the weights variable for filter integration.
+    if np.amax(weights) < 0.05:
+        weights = weights * 100
+        short = np.where(weights >= 0.05)[0][0]
+        long = np.where(weights >= 0.05)[0][-1]
+        weights = weights / 100
+    
+    else:
+        short = np.where(weights >= 0.05)[0][0]
+        long = np.where(weights >= 0.05)[0][-1]
+    
+    if short == long:
+        long += 1      
+    
+    #Now integrate the filter
     weights = weights/np.sum(weights)
-    lumin = np.average(cube, axis=2, weights=weights)    
+    lumin = np.average(cube, axis=2, weights=weights)
+    
+    #Apply offset to "true" I/F
+    lumin += (np.mean(cube[:,:,short:long]) - np.mean(lumin))
+
     return(lumin)
 
 def convert_uint16(cube):
@@ -393,6 +418,208 @@ def mtrdr_to_color(file, name, standard_params=True, new_params=None):
     pass
 
 
+
+def mtrdr_to_cassis(file, fname, color="IPB"):
+    
+    ##Data I/O and formatting
+    with rasterio.open(file) as src:
+        profile = src.profile
+        cube = src.read()
+    
+    cube = format_mtrdr(cube)
+    cube = mtrdr_crop_bands(cube, [380, 1100])
+    cube = cube.transpose(1,2,0)
+    cube = np.ma.masked_values(cube, 65535)
+    
+    #Developer note: CaSSIS filter responses are stored in the following order:
+    #[0] - MTRDR wavelength; [1] - Blue; [2] - PAN; [3] - Red; [4] - NIR
+    
+    #Filter information retrieved from the Spanish Virtual Observatory Filter Profile Repository
+    filter_response = np.genfromtxt("matching_functions/cassis-response-mtrdr.txt", delimiter="\t")
+    
+    ##Calculate filter images filters via integration
+    
+    blu = calculate_luminance((filter_response[:, 1]), cube)
+    pan = calculate_luminance((filter_response[:, 2]), cube)
+    red = calculate_luminance((filter_response[:, 3]), cube)
+    nir = calculate_luminance((filter_response[:, 4]), cube)
+    
+
+    if color == "IPB":
+        export = np.stack((nir, pan, blu))
+        
+    elif color == "IRB":
+        export = np.stack((red, pan, blu))
+        
+    elif color == "ENH":
+        enh_red = red/pan
+        enh_grn = pan/blu
+        enh_blu = pan/nir
+        
+        enh_red += np.average(enh_grn) - np.average(enh_red)
+        enh_blu += np.average(enh_grn) - np.average(enh_blu)
+        export = np.stack((enh_red, enh_grn, enh_blu))
+        
+    else:
+        print("Invalid color keyword, use 'IPB', 'IRB', or 'ENH'.")
+    
+    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))    
+    export = convert_uint16(export)
+    
+    #Update profile for color export
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        driver = 'PNG'
+    )
+    
+    with rasterio.open(fname+"_"+color+".png", 'w', **profile) as out:
+                out.write(export)
+                
+    return
+
+
+def mtrdr_to_hirise(file, fname, color="IRB"):
+    
+    ##Data I/O and formatting
+    with rasterio.open(file) as src:
+        profile = src.profile
+        cube = src.read()
+    
+    cube = format_mtrdr(cube)
+    cube = mtrdr_crop_bands(cube, [380, 1100])
+    cube = cube.transpose(1,2,0)
+    cube = np.ma.masked_values(cube, 65535)
+    
+    #Developer note: HiRISE filter responses are stored in the following order:
+    #[0] - MTRDR wavelength; [1] - NIR; [2] - Red; [3] - Blue-Green
+    
+    #Filter information retrieved from the Spanish Virtual Observatory Filter Profile Repository
+    filter_response = np.genfromtxt("matching_functions/hirise-response-mtrdr.txt", delimiter="\t")
+    
+    ##Calculate filter images filters via integration
+    
+    nir = calculate_luminance((filter_response[:, 1]), cube)
+    red = calculate_luminance((filter_response[:, 2]), cube)
+    bgr = calculate_luminance((filter_response[:, 3]), cube)
+
+    if color == "IRB":
+        export = np.stack((nir, red, bgr))
+        
+    elif color == "RGB":
+        #If RGB is requested, calculate synthetic blue filter according to HiRISE team formula
+        blu = (bgr * 2) - (red * 0.3)
+        #The blue channel tends to be bright, so applying an offset to simulate the I/F of blue
+        #light in CRISM.
+        blu += np.average(cube[:,:,0:10]) - np.average(blu)
+        export = np.stack((red, bgr, blu))
+        
+    elif color == "ENH":
+        enh_red = nir/red
+        enh_grn = nir/bgr
+        enh_blu = red/bgr
+        
+        enh_red += np.average(enh_grn) - np.average(enh_red)
+        enh_blu += np.average(enh_grn) - np.average(enh_blu)
+        export = np.stack((enh_red, enh_grn, enh_blu))
+        
+    else:
+        print("Invalid color keyword, use 'IRB' or 'RGB'.")
+    
+    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))    
+    export = convert_uint16(export)
+    
+    #Update profile for color export
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        driver = 'PNG'
+    )
+    
+    with rasterio.open(fname+"_"+color+".png", 'w', **profile) as out:
+                out.write(export)
+                
+    return
+
+
+def mtrdr_to_hrsc(file, fname, color="IGB", lumin=False):
+    
+    ##Data I/O and formatting
+    with rasterio.open(file) as src:
+        profile = src.profile
+        cube = src.read()
+    
+    cube = format_mtrdr(cube)
+    cube = mtrdr_crop_bands(cube, [380, 1100])
+    cube = cube.transpose(1,2,0)
+    cube = np.ma.masked_values(cube, 65535)
+    
+    #Developer note: HRSC filter responses are stored in the following order:
+    #[0] - MTRDR wavelength; [1] - Nadir; [2] - NIR; [3] - Red; [4] - Green; [5] - Blue;
+    #[6] - Photometry; [7] - Stereo
+    
+    #Approximately 15% of the light entering the HRSC blue filter in the N-UV is not visible
+    #to CRISM, so the filter response is a little different from reality.
+    
+    #Filter information retrieved from the Spanish Virtual Observatory Filter Profile Repository
+    filter_response = np.genfromtxt("matching_functions/hrsc-response-mtrdr.txt", delimiter="\t")
+    
+    ##Calculate filter images filters via integration
+    
+    nad = calculate_luminance((filter_response[:, 1]), cube)
+    nir = calculate_luminance((filter_response[:, 2]), cube)
+    red = calculate_luminance((filter_response[:, 3]), cube)
+    grn = calculate_luminance((filter_response[:, 4]), cube)
+    blu = calculate_luminance((filter_response[:, 5]), cube)
+    pho = calculate_luminance((filter_response[:, 6]), cube)
+    ste = calculate_luminance((filter_response[:, 7]), cube)
+    
+    if color == "IGB":
+        export = np.stack((nir, grn, blu))
+        
+    elif color == "IRB":
+        export = np.stack((nir, red, blu))
+        
+    elif color == "RGB":
+        export = np.stack((red, grn, blu))
+        
+    else:
+        print("Invalid color keyword, use 'IGB', 'IRB', or 'RGB'.")
+    
+    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))    
+    export = convert_uint16(export)
+    
+    #Update profile for color export
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 3,
+        driver = 'PNG'
+    )
+    
+    with rasterio.open(fname+"_"+color+".png", 'w', **profile) as out:
+                out.write(export)
+    
+    if lumin == False:
+        return
+    
+    filter_list = [nad, nir, red, grn, blu, pho, ste]
+    filter_names = ["ND", "IR", "RED", "GRN", "BLU", "P1", "S1"]
+    
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 1,
+        driver = 'PNG'
+    )
+    
+    for item, name in zip(filter_list, filter_names):
+        item = np.expand_dims(item, 0)
+        item = convert_uint16(item)
+        with rasterio.open(fname+"_"+name+".png", 'w', **profile) as out:
+                out.write(item)
+                
+    return
+
+
 def mtrdr_to_mastcam(file, fname, narrowband=True):
     
     ##Data I/O and formatting
@@ -485,7 +712,7 @@ def mtrdr_to_mastcam(file, fname, narrowband=True):
     return
 
 
-def mtrdr_to_hrsc(file, fname, color="IGB", lumin=False):
+def mtrdr_to_mastcamz(file, fname, narrowband=True):
     
     ##Data I/O and formatting
     with rasterio.open(file) as src:
@@ -497,39 +724,30 @@ def mtrdr_to_hrsc(file, fname, color="IGB", lumin=False):
     cube = cube.transpose(1,2,0)
     cube = np.ma.masked_values(cube, 65535)
     
-    #Developer note: HRSC filter responses are stored in the following order:
-    #[0] - MTRDR wavelength; [1] - Nadir; [2] - NIR; [3] - Red; [4] - Green; [5] - Blue;
-    #[6] - Photometry; [7] - Stereo
+    #Developer note: Mastcam filter responses are stored in the following order:
+    #[0] - wavelength
+    #[1-4] - bayer filters (blue, green, red)
+    #[4-10] - Left narrowband filters (L1-L6)
+    #[10:] - Right narrowband filters (R2-R7) (R1 is duplicate of L1 and not included)
     
-    #Approximately 15% of the light entering the HRSC blue filter in the N-UV is not visible
-    #to CRISM, so the filter response is a little different from reality.
+    #Filter responses are adapted from Hayes et al. 2021 (Pre-Flight Calibration of the Mars
+    #2020 Rover Mastcam Zoom (Mastcam-Z) Multispectral Stereoscopic Imager). In-band responses
+    #were primarily used, with out-of-band responses added when these responses were within an 
+    #order of magnitude of peak response.
     
-    #Filter information retrieved from the Spanish Virtual Observatory Filter Profile Repository
-    filter_response = np.genfromtxt("matching_functions/hrsc-response-mtrdr.txt", delimiter="\t")
+    filter_response = np.genfromtxt("matching_functions/mastcamz-response-mtrdr.txt", delimiter="\t")
     
     ##Calculate filter images filters via integration
     
-    nad = calculate_luminance((filter_response[:, 1]), cube)
-    nir = calculate_luminance((filter_response[:, 2]), cube)
-    red = calculate_luminance((filter_response[:, 3]), cube)
-    grn = calculate_luminance((filter_response[:, 4]), cube)
-    blu = calculate_luminance((filter_response[:, 5]), cube)
-    pho = calculate_luminance((filter_response[:, 6]), cube)
-    ste = calculate_luminance((filter_response[:, 7]), cube)
+    blue = calculate_luminance(filter_response[:, 1], cube)
+    green = calculate_luminance(filter_response[:, 2], cube)
+    red = calculate_luminance(filter_response[:, 3], cube)
     
-    if color == "IGB":
-        export = np.stack((nir, grn, blu))
-        
-    elif color == "IRB":
-        export = np.stack((nir, red, blu))
-        
-    elif color == "RGB":
-        export = np.stack((red, grn, blu))
-        
-    else:
-        print("Invalid color keyword, use 'IGB', 'IRB', or 'RGB'.")
+    export = np.stack((red, green, blue))
+    print(export)
+    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))
+    filter_name = "RGB"
     
-    export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))    
     export = convert_uint16(export)
     
     #Update profile for color export
@@ -539,14 +757,41 @@ def mtrdr_to_hrsc(file, fname, color="IGB", lumin=False):
         driver = 'PNG'
     )
     
-    with rasterio.open(fname+"_"+color+".png", 'w', **profile) as out:
+    with rasterio.open(fname+"_"+filter_name+".png", 'w', **profile) as out:
                 out.write(export)
     
-    if lumin == False:
+    if narrowband == False:
         return
     
-    filter_list = [nad, nir, red, grn, blu, pho, ste]
-    filter_names = ["ND", "IR", "RED", "GRN", "BLU", "P1", "S1"]
+    #Unlike the Mastcam setup, where filter calibrations did not account for the Bayer filter,
+    #the Mastcam-Z files provided the filter response through each of the red, green, and blue Bayer
+    #filters. L6 uses only the blue Bayer response, L5 the green Bayer response, and L4 and L3 the 
+    #red Bayer response. 
+    
+    #I am assuming that the NIR filters take the same approach used on Mastcam and simply treat the 
+    #Bayer filters as more or less equally transparent for the purposes of Bayer interpolation. The 
+    #filter response files averaged the filter responses of the convolved NIR and Bayer filters. 
+    
+    #Happy to change this if it is incorrect!
+    
+    l1 = calculate_luminance(filter_response[:, 4], cube)
+    l2 = calculate_luminance(filter_response[:, 5], cube)
+    l3 = calculate_luminance(filter_response[:, 6], cube)
+    l4 = calculate_luminance(filter_response[:, 7], cube)
+    l5 = calculate_luminance(filter_response[:, 8], cube)
+    l6 = calculate_luminance(filter_response[:, 9], cube)
+
+    r2 = calculate_luminance(filter_response[:,10], cube)
+    r3 = calculate_luminance(filter_response[:,11], cube)
+    r4 = calculate_luminance(filter_response[:, 12], cube)
+    r5 = calculate_luminance(filter_response[:, 13], cube)
+    r6 = calculate_luminance(filter_response[:, 14], cube)
+    
+    
+    filter_list = [l1, l2, l3, l4, l5, l6, r2, r3, r4, r5, r6]
+    filter_names = ["L1_800nm", "L2_754nm", "L3_677nm", "L4_605nm", "L5_528nm",
+                   "L6_442nm", "R2_866nm", "R3_910nm", "R4_939nm",
+                   "R5_978nm", "R6_1022nm"]
     
     profile.update(
         dtype = rasterio.uint16,
@@ -563,7 +808,7 @@ def mtrdr_to_hrsc(file, fname, color="IGB", lumin=False):
     return
 
 
-def mtrdr_to_hirise(file, fname, color="IRB"):
+def mtrdr_to_pancam(file, fname, color="RGB", narrowband=True):
     
     ##Data I/O and formatting
     with rasterio.open(file) as src:
@@ -571,32 +816,41 @@ def mtrdr_to_hirise(file, fname, color="IRB"):
         cube = src.read()
     
     cube = format_mtrdr(cube)
-    cube = mtrdr_crop_bands(cube, [380, 1100])
+    cube = mtrdr_crop_bands(cube, [380, 1150])
     cube = cube.transpose(1,2,0)
     cube = np.ma.masked_values(cube, 65535)
     
-    #Developer note: HRSC filter responses are stored in the following order:
-    #[0] - MTRDR wavelength; [1] - NIR; [2] - Red; [3] - Blue-Green
+    #Developer note: PanCam filter responses are stored in the following order:
+    #[0] - MTRDR wavelength; [1:8] - L1-L7; [8:] - R1-R7
     
     #Filter information retrieved from the Spanish Virtual Observatory Filter Profile Repository
-    filter_response = np.genfromtxt("matching_functions/hirise-response-mtrdr.txt", delimiter="\t")
+    filter_response = np.genfromtxt("matching_functions/pancam-response-mtrdr.txt", delimiter="\t")
     
     ##Calculate filter images filters via integration
     
-    nir = calculate_luminance((filter_response[:, 1]), cube)
-    red = calculate_luminance((filter_response[:, 2]), cube)
-    bgr = calculate_luminance((filter_response[:, 3]), cube)
-
-    if color == "IRB":
-        export = np.stack((nir, red, bgr))
+    l1 = calculate_luminance((filter_response[:, 1]), cube)
+    l2 = calculate_luminance((filter_response[:, 2]), cube)
+    l3 = calculate_luminance((filter_response[:, 3]), cube)
+    l4 = calculate_luminance((filter_response[:, 4]), cube)
+    l5 = calculate_luminance((filter_response[:, 5]), cube)
+    l6 = calculate_luminance((filter_response[:, 6]), cube)
+    l7 = calculate_luminance((filter_response[:, 7]), cube)
+    r1 = calculate_luminance((filter_response[:, 8]), cube)
+    r2 = calculate_luminance((filter_response[:, 9]), cube)
+    r3 = calculate_luminance((filter_response[:, 10]), cube)
+    r4 = calculate_luminance((filter_response[:, 11]), cube)
+    r5 = calculate_luminance((filter_response[:, 12]), cube)
+    r6 = calculate_luminance((filter_response[:, 13]), cube)
+    r7 = calculate_luminance((filter_response[:, 14]), cube)
+    
+    if color == "RGB":
+        export = np.stack((l3, l5, l7))
         
-    elif color == "RGB":
-        #If RGB is requested, calculate synthetic blue filter according to HiRISE team formula
-        blu = (bgr * 2) - (0.3 * red)
-        export = np.stack((red, bgr, blu))
+    elif color == "IRB":
+        export = np.stack((l2, l5, l7))
         
     else:
-        print("Invalid color keyword, use 'IRB' or 'RGB'.")
+        print("Invalid color keyword, use 'RGB' or 'IRB'.")
     
     export = (export - (np.amin(export) - (0.02*np.amin(export)))) / ((np.amax(export) + (0.02*np.amax(export))))    
     export = convert_uint16(export)
@@ -610,6 +864,25 @@ def mtrdr_to_hirise(file, fname, color="IRB"):
     
     with rasterio.open(fname+"_"+color+".png", 'w', **profile) as out:
                 out.write(export)
+    
+    if narrowband == False:
+        return
+    
+    filter_list = [l1, l2, l3, l4, l5, l6, l7, r1, r2, r3, r4, r5, r6, r7]
+    filter_names = ["L1_PAN", "L2_750nm", "L3_670nm", "L4_600nm", "L5_530nm", "L6_480nm", "L7_430nm",
+                   "R1_430nm", "R2_750nm", "R3_800nm", "R4_860nm", "R5_900nm", "R6_930nm", "R7_980nm"]
+    
+    profile.update(
+        dtype = rasterio.uint16,
+        count = 1,
+        driver = 'PNG'
+    )
+    
+    for item, name in zip(filter_list, filter_names):
+        item = np.expand_dims(item, 0)
+        item = convert_uint16(item)
+        with rasterio.open(fname+"_"+name+".png", 'w', **profile) as out:
+                out.write(item)
                 
     return
 
